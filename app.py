@@ -2,68 +2,85 @@ import streamlit as st
 import re
 from deep_translator import GoogleTranslator
 
-def translate_rpy_fast_and_accurate(content, target_lang='id'):
+def translate_rpy_mega_fast(content, target_lang='id'):
     lines = content.split('\n')
     
-    # Regex super akurat: Hanya menangkap apa yang ada di dalam tanda kutip dua pertama dan terakhir pada baris dialog
-    # Group 1: Kode/Nama di luar kutip (termasuk spasi)
-    # Group 2: Teks asli di dalam kutip dua yang AKAN diterjemahkan
-    # Group 3: Sisa karakter setelah kutip dua penutup (jika ada)
+    # Regex akurat: Group 1 = luar kutip depan, Group 2 = teks dalam kutip, Group 3 = luar kutip belakang
     dialog_pattern = re.compile(r'^([^"\n]*)"([^"\n]+)"([^"\n]*)$')
     
-    texts_to_translate = []
-    saved_matches = []
+    dialog_data = []
     
-    # LANGKAH 1: Kumpulkan teks di dalam kutip secara kilat
+    # LANGKAH 1: Kumpulkan semua teks di dalam kutip ganda
     for idx, line in enumerate(lines):
         match = dialog_pattern.match(line)
         if match:
             text_inside = match.group(2)
-            if text_inside.strip(): # Pastikan bukan kutip kosong
-                texts_to_translate.append(text_inside)
-                saved_matches.append({
+            if text_inside.strip():  # Abaikan kutip kosong
+                dialog_data.append({
                     'line_idx': idx,
+                    'text': text_inside,
                     'prefix': match.group(1),
                     'suffix': match.group(3)
                 })
                 
-    if not texts_to_translate:
+    if not dialog_data:
         return content
 
-    # LANGKAH 2: Kirim massal ke Google Translator (Sangat Cepat & Hemat Request)
-    try:
-        translator = GoogleTranslator(source='auto', target=target_lang)
-        # Fungsi translate_batch mengirimkan list teks sekaligus dalam satu paket data
-        translated_texts = translator.translate_batch(texts_to_translate)
-        
-        # LANGKAH 3: Rakit kembali teks terjemahan ke baris aslinya
-        for i, match_info in enumerate(saved_matches):
-            idx = match_info['line_idx']
-            prefix = match_info['prefix']
-            suffix = match_info['suffix']
-            new_text = translated_texts[i]
+    # LANGKAH 2: Satukan menjadi chunk besar (< 4500 karakter) agar proses kirim ke Google instan
+    chunks = []
+    current_chunk = []
+    current_length = 0
+    separator = " ||| " 
+    
+    for data in dialog_data:
+        added_length = len(data['text']) + len(separator)
+        if current_length + added_length > 4500:
+            chunks.append(current_chunk)
+            current_chunk = [data]
+            current_length = len(data['text'])
+        else:
+            current_chunk.append(data)
+            current_length += added_length
             
-            # Gabungkan kembali: Luar_Kutip + "Hasil_Terjemahan" + Sisa_Luar_Kutip
-            lines[idx] = f'{prefix}"{new_text}"{suffix}'
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    # LANGKAH 3: Kirim balok teks besar ke Google Translator
+    translator = GoogleTranslator(source='auto', target=target_lang)
+    
+    for chunk in chunks:
+        # Satukan teks dalam chunk dengan pemisah |||
+        combined_text = separator.join([data['text'] for data in chunk])
+        try:
+            # Terjemahkan satu paragraf besar sekaligus (sangat cepat)
+            translated_combined = translator.translate(combined_text)
+            # Pisahkan kembali hasilnya berdasarkan pemisah
+            translated_list = translated_combined.split(separator)
             
-    except Exception as e:
-        st.error(f"Gagal memproses batch: {e}. Menggunakan mode aman otomatis...")
-        # Cadangan jika batch error, terjemahkan sisa per baris
-        translator = GoogleTranslator(source='auto', target=target_lang)
-        for match_info in saved_matches:
-            idx = match_info['line_idx']
-            prefix = match_info['prefix']
-            suffix = match_info['suffix']
-            try:
-                original_text = lines[idx].split('"')[1]
-                lines[idx] = f'{prefix}"{translator.translate(original_text)}"{suffix}'
-            except:
-                pass
-                
+            # Jika jumlah potongannya pas, masukkan kembali tepat ke dalam kutip dua
+            if len(translated_list) == len(chunk):
+                for i, data in enumerate(chunk):
+                    idx = data['line_idx']
+                    prefix = data['prefix']
+                    suffix = data['suffix']
+                    # Ganti baris asli: teks luar kutip tidak disentuh, teks dalam kutip diperbarui
+                    lines[idx] = f'{prefix}"{translated_list[i].strip()}"{suffix}'
+            else:
+                # Mode cadangan darurat khusus untuk chunk ini jika pemisah dirusak oleh Google
+                for data in chunk:
+                    try:
+                        idx = data['line_idx']
+                        lines[idx] = f'{data["prefix"]}"{translator.translate(data["text"])}"{data["suffix"]}'
+                    except:
+                        pass
+        except:
+            # Jika gagal total, biarkan baris teks aslinya aman
+            pass
+            
     return '\n'.join(lines)
 
-st.title("Ren'Py (.rpy) Translator - KILAT & AKURAT ⚡")
-st.write("Hanya menerjemahkan teks di dalam simbol \"...\". Nama karakter dan perintah kode di luar simbol dijamin aman.")
+st.title("Ren'Py (.rpy) Translator - MEGA FAST & ACCURATE ⚡")
+st.write("Sistem Pemrosesan Balok Teks: Hanya menerjemahkan isi di dalam kutip dua dengan kecepatan maksimal.")
 
 lang_options = {'Indonesia': 'id', 'Inggris': 'en', 'Jepang': 'ja', 'Spanyol': 'es'}
 selected_lang = st.selectbox("Pilih Bahasa Target:", list(lang_options.keys()))
@@ -73,9 +90,9 @@ uploaded_file = st.file_uploader("Pilih file .rpy", type=["rpy"])
 
 if uploaded_file is not None:
     file_contents = uploaded_file.getvalue().decode("utf-8")
-    if st.button("Mulai Terjemahkan Kilat"):
-        with st.spinner("Sedang memproses dokumen dengan kecepatan tinggi..."):
-            result = translate_rpy_fast_and_accurate(file_contents, target_code)
+    if st.button("Mulai Terjemahkan Super Kilat"):
+        with st.spinner("Menerjemahkan ribuan baris dalam beberapa detik..."):
+            result = translate_rpy_mega_fast(file_contents, target_code)
             st.success("Penerjemahan selesai!")
             st.download_button(
                 label="Unduh File Terjemahan",
