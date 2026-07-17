@@ -2,15 +2,15 @@ import streamlit as st
 import re
 from deep_translator import GoogleTranslator
 
-def translate_rpy_mega_fast(content, target_lang='id'):
+def translate_rpy_safe_and_fast(content, target_lang='id'):
     lines = content.split('\n')
     
-    # Regex akurat: Group 1 = luar kutip depan, Group 2 = teks dalam kutip, Group 3 = luar kutip belakang
+    # Regex akurat: Hanya mengambil teks di dalam kutip dua ("...")
     dialog_pattern = re.compile(r'^([^"\n]*)"([^"\n]+)"([^"\n]*)$')
     
     dialog_data = []
     
-    # LANGKAH 1: Kumpulkan semua teks di dalam kutip ganda
+    # LANGKAH 1: Kumpulkan semua data dialog
     for idx, line in enumerate(lines):
         match = dialog_pattern.match(line)
         if match:
@@ -26,61 +26,48 @@ def translate_rpy_mega_fast(content, target_lang='id'):
     if not dialog_data:
         return content
 
-    # LANGKAH 2: Satukan menjadi chunk besar (< 4500 karakter) agar proses kirim ke Google instan
-    chunks = []
-    current_chunk = []
-    current_length = 0
-    separator = " ||| " 
-    
-    for data in dialog_data:
-        added_length = len(data['text']) + len(separator)
-        if current_length + added_length > 4500:
-            chunks.append(current_chunk)
-            current_chunk = [data]
-            current_length = len(data['text'])
-        else:
-            current_chunk.append(data)
-            current_length += added_length
-            
-    if current_chunk:
-        chunks.append(current_chunk)
-
-    # LANGKAH 3: Kirim balok teks besar ke Google Translator
+    # LANGKAH 2: Proses kirim massal menggunakan daftar terisolasi (Batch Slicing)
+    # Kita bagi menjadi kelompok kecil berisi 50 dialog agar Google tidak overload dan tetap kilat
+    batch_size = 50
     translator = GoogleTranslator(source='auto', target=target_lang)
     
-    for chunk in chunks:
-        # Satukan teks dalam chunk dengan pemisah |||
-        combined_text = separator.join([data['text'] for data in chunk])
+    # Ekstrak hanya teksnya saja untuk dikirim ke translator
+    all_texts = [data['text'] for data in dialog_data]
+    translated_texts = []
+    
+    progress_bar = st.progress(0)
+    total_batches = (len(all_texts) + batch_size - 1) // batch_size
+
+    for i in range(0, len(all_texts), batch_size):
+        batch = all_texts[i:i + batch_size]
         try:
-            # Terjemahkan satu paragraf besar sekaligus (sangat cepat)
-            translated_combined = translator.translate(combined_text)
-            # Pisahkan kembali hasilnya berdasarkan pemisah
-            translated_list = translated_combined.split(separator)
+            # Mengirimkan list murni tanpa simbol pemisah buatan yang rawan rusak
+            translated_batch = translator.translate_batch(batch)
+            translated_texts.extend(translated_batch)
+        except Exception as e:
+            # Jika batch ini gagal, gunakan teks asli agar game tidak crash
+            st.warning(f"Ada kendala di baris {i}, menggunakan teks asli untuk bagian ini.")
+            translated_texts.extend(batch)
             
-            # Jika jumlah potongannya pas, masukkan kembali tepat ke dalam kutip dua
-            if len(translated_list) == len(chunk):
-                for i, data in enumerate(chunk):
-                    idx = data['line_idx']
-                    prefix = data['prefix']
-                    suffix = data['suffix']
-                    # Ganti baris asli: teks luar kutip tidak disentuh, teks dalam kutip diperbarui
-                    lines[idx] = f'{prefix}"{translated_list[i].strip()}"{suffix}'
-            else:
-                # Mode cadangan darurat khusus untuk chunk ini jika pemisah dirusak oleh Google
-                for data in chunk:
-                    try:
-                        idx = data['line_idx']
-                        lines[idx] = f'{data["prefix"]}"{translator.translate(data["text"])}"{data["suffix"]}'
-                    except:
-                        pass
-        except:
-            # Jika gagal total, biarkan baris teks aslinya aman
-            pass
+        # Update progress bar
+        current_batch_idx = i // batch_size
+        progress_bar.progress((current_batch_idx + 1) / total_batches)
+
+    # LANGKAH 3: Tulis kembali hasil terjemahan ke dalam file .rpy
+    # Karena strukturnya terisolasi, posisi baris dijamin 100% presisi dengan game asli
+    for idx, data in enumerate(dialog_data):
+        line_idx = data['line_idx']
+        prefix = data['prefix']
+        suffix = data['suffix']
+        new_text = translated_texts[idx]
+        
+        # Kembalikan ke dalam kutip dua, bagian luar kutip tidak disentuh
+        lines[line_idx] = f'{prefix}"{new_text}"{suffix}'
             
     return '\n'.join(lines)
 
-st.title("Ren'Py (.rpy) Translator - MEGA FAST & ACCURATE ⚡")
-st.write("Sistem Pemrosesan Balok Teks: Hanya menerjemahkan isi di dalam kutip dua dengan kecepatan maksimal.")
+st.title("Ren'Py (.rpy) Translator - SAFE BATCH MODE 🛡️⚡")
+st.write("Versi Anti-Crash: Menggunakan isolasi list murni agar struktur internal game tidak rusak dan tetap cepat.")
 
 lang_options = {'Indonesia': 'id', 'Inggris': 'en', 'Jepang': 'ja', 'Spanyol': 'es'}
 selected_lang = st.selectbox("Pilih Bahasa Target:", list(lang_options.keys()))
@@ -90,9 +77,9 @@ uploaded_file = st.file_uploader("Pilih file .rpy", type=["rpy"])
 
 if uploaded_file is not None:
     file_contents = uploaded_file.getvalue().decode("utf-8")
-    if st.button("Mulai Terjemahkan Super Kilat"):
-        with st.spinner("Menerjemahkan ribuan baris dalam beberapa detik..."):
-            result = translate_rpy_mega_fast(file_contents, target_code)
+    if st.button("Mulai Terjemahkan Aman & Cepat"):
+        with st.spinner("Menerjemahkan dengan metode isolasi batch... Mohon tunggu."):
+            result = translate_rpy_safe_and_fast(file_contents, target_code)
             st.success("Penerjemahan selesai!")
             st.download_button(
                 label="Unduh File Terjemahan",
