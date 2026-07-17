@@ -2,81 +2,69 @@ import streamlit as st
 import re
 from deep_translator import GoogleTranslator
 
-def translate_rpy_ultra_fast(content, target_lang='id'):
+def translate_text_safely(text, translator):
+    """
+    Fungsi untuk menerjemahkan teks sambil mengamankan tag internal Ren'Py seperti [variable] atau {w}
+    """
+    if not text.strip():
+        return text
+        
+    # Proteksi tag Ren'Py agar tidak rusak (contoh: [name] atau {w})
+    placeholders = {}
+    
+    def replacer(match):
+        placeholder = f" _TAG_{len(placeholders)}_ "
+        placeholders[placeholder.strip()] = match.group(0)
+        return placeholder
+
+    # Cari semua pola [teks] dan {teks} untuk diamankan
+    protected_text = re.sub(r'(\[[^\]]+\]|\{[^\}]+\})', replacer, text)
+    
+    try:
+        translated = translator.translate(protected_text)
+        
+        # Kembalikan tag asli ke tempatnya semula
+        for placeholder, original_tag in placeholders.items():
+            translated = re.sub(re.escape(placeholder), original_tag, translated, flags=re.IGNORECASE)
+            # Cadangan jika translator merubah spasi tag
+            translated = re.sub(re.escape(placeholder.strip()), original_tag, translated, flags=re.IGNORECASE)
+            
+        return translated
+    except:
+        return text
+
+def translate_rpy_perfect(content, target_lang='id'):
     lines = content.split('\n')
-    dialog_pattern = re.compile(r'^(\s*(?:\w+\s+)?)["\']([^"\']+)["\']\s*$')
+    translator = GoogleTranslator(source='auto', target=target_lang)
     
-    # Kumpulan data dialog
-    dialog_data = []
+    # Regex super yang bisa mendeteksi dialog dengan karakter, kutip satu, kutip dua, maupun kutip tiga
+    # Format: karakter "dialog" ATAU "dialog saja"
+    dialog_pattern = re.compile(r'^(\s*(?:\w+\s+)?)("""|\'\'\'|"|\')(.+?)\2\s*$')
     
-    # Langkah 1: Ekstrak semua dialog yang valid
+    progress_bar = st.progress(0)
+    total_lines = len(lines)
+    
     for idx, line in enumerate(lines):
         match = dialog_pattern.match(line)
         if match:
-            text = match.group(2)
-            if text.strip():  # Abaikan teks kosong
-                dialog_data.append({'index': idx, 'text': text, 'prefix': match.group(1)})
-                
-    if not dialog_data:
-        return content
-
-    # Langkah 2: Gabungkan dialog menjadi blok-blok besar (Chunking) < 4500 karakter
-    chunks = []
-    current_chunk = []
-    current_length = 0
-    
-    # Gunakan separator unik yang aman dari karakter normal game
-    separator = " ||| " 
-    
-    for data in dialog_data:
-        # Estimasi panjang jika teks digabungkan
-        added_length = len(data['text']) + len(separator)
-        if current_length + added_length > 4500:
-            chunks.append(current_chunk)
-            current_chunk = [data]
-            current_length = len(data['text'])
-        else:
-            current_chunk.append(data)
-            current_length += added_length
+            prefix = match.group(1)       # Nama karakter atau spasi di depan
+            quote_type = match.group(2)   # Jenis tanda kutip yang dipakai (" atau ' atau """)
+            text_to_translate = match.group(3) # Isi teks aslinya
             
-    if current_chunk:
-        chunks.append(current_chunk)
-
-    # Langkah 3: Kirim blok besar tersebut ke Google Translator
-    translator = GoogleTranslator(source='auto', target=target_lang)
-    progress_bar = st.progress(0)
-    total_chunks = len(chunks)
-    
-    for chunk_idx, chunk in enumerate(chunks):
-        # Gabungkan teks dalam satu chunk menjadi satu string tunggal
-        combined_text = separator.join([data['text'] for data in chunk])
-        try:
-            translated_combined = translator.translate(combined_text)
-            # Pisahkan kembali hasil terjemahan berdasarkan separator
-            translated_list = translated_combined.split(separator)
+            # Terjemahkan teks secara aman
+            translated_text = translate_text_safely(text_to_translate, translator)
             
-            # Jika jumlah teks cocok, masukkan kembali ke baris asli file
-            if len(translated_list) == len(chunk):
-                for i, data in enumerate(chunk):
-                    lines[data['index']] = f'{data["prefix"]}"{translated_list[i].strip()}"'
-            else:
-                # Mode aman cadangan jika separator rusak (diterjemahkan per baris khusus chunk ini)
-                for data in chunk:
-                    try:
-                        lines[data['index']] = f'{data["prefix"]}"{translator.translate(data["text"])}"'
-                    except:
-                        pass
-        except Exception as e:
-            # Jika chunk gagal total, biarkan baris aslinya agar file tidak rusak
-            pass
+            # Susun kembali sesuai format aslinya tanpa merusak tanda kutip game
+            lines[idx] = f'{prefix}{quote_type}{translated_text}{quote_type}'
             
-        # Update bar progress di layar HP
-        progress_bar.progress((chunk_idx + 1) / total_chunks)
-        
+        # Update status progress bar di HP
+        if idx % 10 == 0 or idx == total_lines - 1:
+            progress_bar.progress((idx + 1) / total_lines)
+            
     return '\n'.join(lines)
 
-st.title("Ren'Py (.rpy) Translator - ULTRA FAST MODE ⚡")
-st.write("Menggunakan sistem enkapsulasi teks untuk memangkas waktu tunggu hingga 90%.")
+st.title("Ren'Py (.rpy) Translator - PERFECT MODE 🛠️")
+st.write("Versi pembaruan otomatis untuk membaca semua jenis format dialog dan mengamankan kode game.")
 
 lang_options = {'Indonesia': 'id', 'Inggris': 'en', 'Jepang': 'ja', 'Spanyol': 'es'}
 selected_lang = st.selectbox("Pilih Bahasa Target:", list(lang_options.keys()))
@@ -86,10 +74,10 @@ uploaded_file = st.file_uploader("Pilih file .rpy", type=["rpy"])
 
 if uploaded_file is not None:
     file_contents = uploaded_file.getvalue().decode("utf-8")
-    if st.button("Mulai Terjemahkan Kilat"):
-        with st.spinner("Sedang memproses dokumen massal... Mohon tunggu."):
-            result = translate_rpy_ultra_fast(file_contents, target_code)
-            st.success("Penerjemahan selesai!")
+    if st.button("Mulai Terjemahkan Semua Dialog"):
+        with st.spinner("Sedang memproses seluruh baris dialog... Mohon tunggu."):
+            result = translate_rpy_perfect(file_contents, target_code)
+            st.success("Penerjemahan selesai total!")
             st.download_button(
                 label="Unduh File Terjemahan",
                 data=result,
