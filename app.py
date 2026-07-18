@@ -41,38 +41,45 @@ def make_it_casual(text):
         
     return text
 
-def clean_for_renpy(text):
+def clean_strictly_for_joiplay(text):
     """
-    Mencegah game crash/keluar sendiri dengan merapikan tanda kutip dua internal
+    SISTEM PROTEKSI UTAMA JOIPLAY:
+    Menghapus dan menetralkan tanda kutip dua internal agar Joiplay tidak menutup paksa.
     """
     if not text:
         return ""
-    text = text.replace('“', '\\"').replace('”', '\\"').replace('"', '\\"')
-    text = re.sub(r'(?<!\\)\\"', '\\"', text)
-    return text
+    
+    # 1. Bersihkan tanda kutip dekoratif bawaan keyboard HP / Google Translate
+    text = text.replace('“', "'").replace('”', "'").replace('„', "'")
+    
+    # 2. Jika ada kutip dua biasa di dalam kalimat, ganti menjadi kutip satu agar sintaks game aman
+    text = text.replace('"', "'")
+    
+    # 3. Amankan karakter khusus Ren'Py % atau \ yang rawan merusak pembacaan script
+    text = text.replace('%', ' persen').replace('\\', '/')
+    
+    return text.strip()
 
 def translate_single_item(data, target_lang):
-    """
-    Fungsi pekerja untuk menerjemahkan satu baris dialog secara independen
-    """
     try:
-        # Menggunakan engine Google via translators
         raw_translation = ts.translate_text(data['text'], from_language='auto', to_language=target_lang, translator='google')
         casual_text = make_it_casual(raw_translation)
-        safe_text = clean_for_renpy(casual_text)
+        
+        # Sterilisasi ketat untuk kenyamanan Joiplay
+        safe_text = clean_strictly_for_joiplay(casual_text)
+        
         return {'line_idx': data['line_idx'], 'result': f'{data["prefix"]}"{safe_text}"{data["suffix"]}'}
     except:
-        # Jika gagal karena limit, pertahankan baris asli agar tidak ada teks yang hilang
+        # Jika baris ini gagal, kembalikan teks asli murni agar file game tidak korup
         return {'line_idx': data['line_idx'], 'result': f'{data["prefix"]}"{data["text"]}"{data["suffix"]}'}
 
-def translate_rpy_turbo_speed(content, target_lang='id'):
+def translate_rpy_joiplay_edition(content, target_lang='id'):
     lines = content.split('\n')
     
     # Regex super akurat pemisah tanda kutip
     dialog_pattern = re.compile(r'^([^"\n]*)"([^"\n]*)"([^"\n]*)$')
     dialog_data = []
     
-    # LANGKAH 1: Data Mining dialog secara cepat
     for idx, line in enumerate(lines):
         match = dialog_pattern.match(line)
         if match:
@@ -88,15 +95,11 @@ def translate_rpy_turbo_speed(content, target_lang='id'):
     if not dialog_data:
         return content
 
-    # LANGKAH 2: Pemrosesan Paralel (Turbo Speed Run)
-    # ThreadPoolExecutor akan mengirim puluhan baris sekaligus ke Google secara bersamaan
     progress_bar = st.progress(0)
-    st.write(f"Mendeteksi {len(dialog_data)} baris dialog. Memulai akselerasi paralel...")
-    
     processed_count = 0
     total_dialogs = len(dialog_data)
     
-    # max_workers=15 berarti server akan memproses 15 baris dialog secara bersamaan dalam 1 detik
+    # Menjalankan multi-threading paralel 15 pekerja secara bersamaan
     with ThreadPoolExecutor(max_workers=15) as executor:
         futures = [executor.submit(translate_single_item, data, target_lang) for data in dialog_data]
         
@@ -104,15 +107,14 @@ def translate_rpy_turbo_speed(content, target_lang='id'):
             res_data = future.result()
             lines[res_data['line_idx']] = res_data['result']
             
-            # Update bar progress secara berkala di layar HP
             processed_count += 1
             if processed_count % 10 == 0 or processed_count == total_dialogs:
                 progress_bar.progress(processed_count / total_dialogs)
             
     return '\n'.join(lines)
 
-st.title("Ren'Py Translator - TURBO PARALEL MODE 🏎️⚡")
-st.write("Hanya menerjemahkan isi tanda kutip dua. Menggunakan sistem multi-core paralel, instan, bahasa gaul, dan anti-crash.")
+st.title("Ren'Py Joiplay Translator - ANTICRASH & TURBO 📱⚡")
+st.write("Versi Pembaruan Joiplay Engine: Memperbaiki bug keluar sendiri dengan mengganti kutip internal menjadi kutip satu.")
 
 lang_options = {'Indonesia': 'id', 'Inggris': 'en', 'Jepang': 'ja', 'Spanyol': 'es'}
 selected_lang = st.selectbox("Pilih Bahasa Target:", list(lang_options.keys()))
@@ -122,13 +124,17 @@ uploaded_file = st.file_uploader("Pilih file .rpy", type=["rpy"])
 
 if uploaded_file is not None:
     file_contents = uploaded_file.getvalue().decode("utf-8")
-    if st.button("Mulai Terjemahkan Turbo"):
-        with st.spinner("Membagi tugas ke seluruh core server... Mohon tunggu."):
-            result = translate_rpy_turbo_speed(file_contents, target_code)
-            st.success("Selesai total! Struktur file dijamin utuh dan aman.")
+    if st.button("Mulai Akselerasi Terjemahan"):
+        with st.spinner("Memproses sinkronisasi teks anti-crash... Mohon tunggu."):
+            result = translate_rpy_joiplay_edition(file_contents, target_code)
+            st.success("Selesai total! File diproteksi penuh dari Joiplay Force Close.")
+            
+            # FITUR UTAMA KEDUA: Memaksa encoding menjadi UTF-8 dengan format SIG/BOM agar dibaca lancar di Android
+            bom_result = '\ufeff' + result
+            
             st.download_button(
-                label="Unduh File Terjemahan",
-                data=result,
+                label="Unduh File Terjemahan Joiplay",
+                data=bom_result.encode('utf-8'),
                 file_name=f"translated_{uploaded_file.name}",
                 mime="text/plain"
             )
