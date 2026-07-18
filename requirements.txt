@@ -1,2 +1,2 @@
 streamlit
-translators
+deep-translator
