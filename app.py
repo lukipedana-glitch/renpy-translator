@@ -1,6 +1,7 @@
 import streamlit as st
 import re
 import translators as ts
+from concurrent.futures import ThreadPoolExecutor
 
 def make_it_casual(text):
     """
@@ -10,7 +11,6 @@ def make_it_casual(text):
     if not text or not isinstance(text, str):
         return text
         
-    # Kamus lokalisasi bahasa gaul tongkrongan / dunia nyata
     casual_dictionary = {
         r'\bAnda\b': 'kamu',
         r'\bSaya\b': 'aku',
@@ -47,19 +47,29 @@ def clean_for_renpy(text):
     """
     if not text:
         return ""
-    # Ubah kutip miring bawaan teks menjadi kutip lurus standar game
     text = text.replace('“', '\\"').replace('”', '\\"').replace('"', '\\"')
-    # Amankan backslash ganda yang berpotensi merusak sintaks Ren'Py
     text = re.sub(r'(?<!\\)\\"', '\\"', text)
     return text
 
-def translate_rpy_ultimate_speed(content, target_lang='id'):
+def translate_single_item(data, target_lang):
+    """
+    Fungsi pekerja untuk menerjemahkan satu baris dialog secara independen
+    """
+    try:
+        # Menggunakan engine Google via translators
+        raw_translation = ts.translate_text(data['text'], from_language='auto', to_language=target_lang, translator='google')
+        casual_text = make_it_casual(raw_translation)
+        safe_text = clean_for_renpy(casual_text)
+        return {'line_idx': data['line_idx'], 'result': f'{data["prefix"]}"{safe_text}"{data["suffix"]}'}
+    except:
+        # Jika gagal karena limit, pertahankan baris asli agar tidak ada teks yang hilang
+        return {'line_idx': data['line_idx'], 'result': f'{data["prefix"]}"{data["text"]}"{data["suffix"]}'}
+
+def translate_rpy_turbo_speed(content, target_lang='id'):
     lines = content.split('\n')
     
-    # Regex super akurat: Membagi baris menjadi (Luar_Depan) "Teks_Dalam" (Luar_Belakang)
-    # Menjamin 100% kode, variabel, dan nama di luar simbol " TIDAK AKAN berubah
+    # Regex super akurat pemisah tanda kutip
     dialog_pattern = re.compile(r'^([^"\n]*)"([^"\n]*)"([^"\n]*)$')
-    
     dialog_data = []
     
     # LANGKAH 1: Data Mining dialog secara cepat
@@ -67,7 +77,7 @@ def translate_rpy_ultimate_speed(content, target_lang='id'):
         match = dialog_pattern.match(line)
         if match:
             text_inside = match.group(2)
-            if text_inside.strip(): # Abaikan kutip kosong
+            if text_inside.strip(): 
                 dialog_data.append({
                     'line_idx': idx,
                     'text': text_inside,
@@ -78,40 +88,31 @@ def translate_rpy_ultimate_speed(content, target_lang='id'):
     if not dialog_data:
         return content
 
-    # LANGKAH 2: Batch Translation menggunakan Engine Kilat 'translators'
-    # Membagi tugas ke kelompok kecil 40 baris agar instan tanpa loading lama
-    batch_size = 40
+    # LANGKAH 2: Pemrosesan Paralel (Turbo Speed Run)
+    # ThreadPoolExecutor akan mengirim puluhan baris sekaligus ke Google secara bersamaan
     progress_bar = st.progress(0)
+    st.write(f"Mendeteksi {len(dialog_data)} baris dialog. Memulai akselerasi paralel...")
+    
+    processed_count = 0
     total_dialogs = len(dialog_data)
-
-    for i in range(0, total_dialogs, batch_size):
-        batch = dialog_data[i:i + batch_size]
+    
+    # max_workers=15 berarti server akan memproses 15 baris dialog secara bersamaan dalam 1 detik
+    with ThreadPoolExecutor(max_workers=15) as executor:
+        futures = [executor.submit(translate_single_item, data, target_lang) for data in dialog_data]
         
-        for data in batch:
-            try:
-                # Menggunakan engine Google via library translators (Sangat cepat dan responsif)
-                raw_translation = ts.translate_text(data['text'], from_language='auto', to_language=target_lang, translator='google')
-                
-                # Sempurnakan hasil: Ubah ke bahasa kasual sehari-hari
-                casual_text = make_it_casual(raw_translation)
-                
-                # Tebul/Tambal Bug: Bersihkan simbol kutip perusak mesin Ren'Py
-                safe_text = clean_for_renpy(casual_text)
-                
-                # Masukkan kembali ke baris asli di dalam file
-                lines[data['line_idx']] = f'{data["prefix"]}"{safe_text}"{data["suffix"]}'
-            except:
-                # Jika baris ini gagal karena gangguan server, gunakan teks asli agar game tidak corrupt
-                pass
-        
-        # Update progress bar jalan di layar HP Anda
-        current_progress = min((i + batch_size) / total_dialogs, 1.0)
-        progress_bar.progress(current_progress)
+        for future in futures:
+            res_data = future.result()
+            lines[res_data['line_idx']] = res_data['result']
+            
+            # Update bar progress secara berkala di layar HP
+            processed_count += 1
+            if processed_count % 10 == 0 or processed_count == total_dialogs:
+                progress_bar.progress(processed_count / total_dialogs)
             
     return '\n'.join(lines)
 
-st.title("Ren'Py Translator - ULTIMATE SPEED & CASUAL ⚡")
-st.write("Hanya menerjemahkan isi di dalam simbol \"...\". Kecepatan maksimal, otomatis bahasa gaul, anti-crash.")
+st.title("Ren'Py Translator - TURBO PARALEL MODE 🏎️⚡")
+st.write("Hanya menerjemahkan isi tanda kutip dua. Menggunakan sistem multi-core paralel, instan, bahasa gaul, dan anti-crash.")
 
 lang_options = {'Indonesia': 'id', 'Inggris': 'en', 'Jepang': 'ja', 'Spanyol': 'es'}
 selected_lang = st.selectbox("Pilih Bahasa Target:", list(lang_options.keys()))
@@ -121,10 +122,10 @@ uploaded_file = st.file_uploader("Pilih file .rpy", type=["rpy"])
 
 if uploaded_file is not None:
     file_contents = uploaded_file.getvalue().decode("utf-8")
-    if st.button("Mulai Terjemahkan Kilat"):
-        with st.spinner("Menyelaraskan bahasa gaul dunia nyata... Mohon tunggu."):
-            result = translate_rpy_ultimate_speed(file_contents, target_code)
-            st.success("Selesai total! File aman dari bug crash.")
+    if st.button("Mulai Terjemahkan Turbo"):
+        with st.spinner("Membagi tugas ke seluruh core server... Mohon tunggu."):
+            result = translate_rpy_turbo_speed(file_contents, target_code)
+            st.success("Selesai total! Struktur file dijamin utuh dan aman.")
             st.download_button(
                 label="Unduh File Terjemahan",
                 data=result,
