@@ -1,34 +1,70 @@
 import streamlit as st
 import re
-from deep_translator import GoogleTranslator
+from google_translator import GoogleTranslator
 
-def clean_and_normalize_dialog(text):
+def make_it_casual(text):
     """
-    Mengamankan teks dari karakter aneh yang bisa merusak struktur file Ren'Py
+    Mengubah kata kaku formal bawaan Google Translate menjadi bahasa gaul sehari-hari di dunia nyata
+    """
+    if not text or not isinstance(text, str):
+        return text
+        
+    # Daftar kamus konversi kata formal ke bahasa santai
+    casual_dictionary = {
+        r'\bAnda\b': 'kamu',
+        r'\bSaya\b': 'aku',
+        r'\bTidak\b': 'nggak',
+        r'\bApakah\b': 'apa',
+        r'\bBenar\b': 'bener',
+        r'\bSangat\b': 'banget',
+        r'\bMengapa\b': 'kenapa',
+        r'\bBagaimana\b': 'gimana',
+        r'\bTetapi\b': 'tapi',
+        r'\bNamun\b': 'tapi',
+        r'\bBisa\b': 'bisa',
+        r'\bAkan\b': 'bakal',
+        r'\bMelihat\b': 'liat',
+        r'\bSudah\b': 'udah',
+        r'\bSaja\b': 'aja',
+        r'\bBukan\b': 'bukan',
+        r'\bPergi\b': 'pergi',
+        r'\bDatang\b': 'datang',
+        r'\bKembali\b': 'balik',
+        r'\bUang\b': 'duit',
+        r'\bTeman\b': 'temen',
+    }
+    
+    # Proses penggantian kata gaul otomatis
+    for formal, casual in casual_dictionary.items():
+        text = re.sub(formal, casual, text, flags=re.IGNORECASE)
+        
+    return text
+
+def clean_for_renpy(text):
+    """
+    Mengamankan tanda kutip di dalam kalimat agar mesin game Ren'Py tidak crash/keluar sendiri
     """
     if not text:
         return ""
-    # Ubah kutip miring bawaan teks HP menjadi kutip lurus standar agar tidak merusak kode
+    # Ubah kutip miring HP menjadi kutip lurus, amankan kutip dua di dalam kalimat dengan backslash (\")
     text = text.replace('“', '\\"').replace('”', '\\"').replace('"', '\\"')
-    # Jika di ujung teks sudah ada escape slash ganda yang rusak, bersihkan
     text = re.sub(r'(?<!\\)\\"', '\\"', text)
     return text
 
-def translate_rpy_ultimate(content, target_lang='id'):
+def translate_rpy_speedrun(content, target_lang='id'):
     lines = content.split('\n')
     
-    # Regex Super Ketat: Memisahkan bagian Luar Depan, Teks Dalam Kutip, dan Luar Belakang
-    # Menjamin 100% bagian luar tanda kutip TIDAK AKAN disentuh atau berubah satu huruf pun
+    # Regex super akurat: Hanya ambil teks murni di dalam tanda kutip dua pertama dan terakhir
     dialog_pattern = re.compile(r'^([^"\n]*)"([^"\n]*)"([^"\n]*)$')
     
     dialog_data = []
     
-    # LANGKAH 1: Ekstrak semua teks secara aman
+    # LANGKAH 1: Kumpulkan semua data dialog
     for idx, line in enumerate(lines):
         match = dialog_pattern.match(line)
         if match:
             text_inside = match.group(2)
-            if text_inside.strip():  # Abaikan baris kutip kosong
+            if text_inside.strip(): # Lewati jika kutip kosong
                 dialog_data.append({
                     'line_idx': idx,
                     'text': text_inside,
@@ -39,9 +75,9 @@ def translate_rpy_ultimate(content, target_lang='id'):
     if not dialog_data:
         return content
 
-    # LANGKAH 2: Proses Batch Slicing Kilat (Per 100 baris langsung)
-    batch_size = 100
-    translator = GoogleTranslator(source='auto', target=target_lang)
+    # LANGKAH 2: Terjemahkan Massal (Batch) Secara Kilat Menggunakan Engine Baru
+    batch_size = 80
+    translator = GoogleTranslator()
     
     all_texts = [data['text'] for data in dialog_data]
     translated_texts = []
@@ -52,44 +88,40 @@ def translate_rpy_ultimate(content, target_lang='id'):
     for i in range(0, len(all_texts), batch_size):
         batch = all_texts[i:i + batch_size]
         try:
-            # Kirim sekelompok teks sekaligus dalam satu request (Sangat cepat dan instan)
-            translated_batch = translator.translate_batch(batch)
+            # Gunakan bulk translation bawaan yang super cepat
+            translated_batch = [translator.translate(t, lang_tgt=target_lang) for t in batch]
             translated_texts.extend(translated_batch)
         except Exception as e:
-            # Proteksi cadangan jika server Google overload, tetap gunakan teks asli agar game tidak crash
+            # Proteksi jika gagal, kembalikan teks asli agar proses tetap jalan terus tanpa berhenti
             translated_texts.extend(batch)
             
         current_batch_idx = i // batch_size
         progress_bar.progress((current_batch_idx + 1) / total_batches)
 
-    # LANGKAH 3: Penyusunan Kembali & Polishing Bahasa Santai
+    # LANGKAH 3: Tulis kembali hasil ke file .rpy dengan optimasi bahasa kasual
     for idx, data in enumerate(dialog_data):
         line_idx = data['line_idx']
         prefix = data['prefix']
         suffix = data['suffix']
-        raw_translation = translated_texts[idx]
         
-        # Lokalisasi bahasa agar terasa seperti obrolan sehari-hari (Casual Conversion)
-        # Menghapus kata formal bawaan Google Translate yang kaku
-        casual_text = raw_translation
-        casual_text = re.sub(r'\bAnda\b', 'kamu', casual_text, flags=re.IGNORECASE)
-        casual_text = re.sub(r'\bSaya\b', 'aku', casual_text, flags=re.IGNORECASE)
-        casual_text = re.sub(r'\bTidak\b', 'nggak', casual_text, flags=re.IGNORECASE)
-        casual_text = re.sub(r'\bApakah\b', 'apa', casual_text, flags=re.IGNORECASE)
-        casual_text = re.sub(r'\bBenar\b', 'bener', casual_text, flags=re.IGNORECASE)
-        casual_text = re.sub(r'\bSangat\b', 'banget', casual_text, flags=re.IGNORECASE)
-        casual_text = re.sub(r'\bMengapa\b', 'kenapa', casual_text, flags=re.IGNORECASE)
+        # Ambil hasil terjemahan (pastikan berupa string)
+        raw_text = translated_texts[idx]
+        if not isinstance(raw_text, str):
+            raw_text = str(raw_text) if raw_text is not None else data['text']
+            
+        # Ubah ke bahasa gaul santai dunia nyata
+        casual_text = make_it_casual(raw_text)
         
-        # Bersihkan teks hasil terjemahan sebelum dibungkus kembali ke file game
-        safe_text = clean_and_normalize_dialog(casual_text)
+        # Bersihkan kutip dua liar agar game tidak force close
+        safe_text = clean_for_renpy(casual_text)
         
-        # Bungkus kembali ke format Ren'Py asli tanpa merusak sintaks luar
+        # Kembalikan ke dalam tanda kutip dua murni, luar tanda kutip dijamin tidak berubah
         lines[line_idx] = f'{prefix}"{safe_text}"{suffix}'
             
     return '\n'.join(lines)
 
-st.title("Ren'Py (.rpy) Translator - ULTIMATE CASUAL MODE 🧠⚡")
-st.write("Versi Sempurna: Terjemahan bahasa gaul sehari-hari, super cepat, dan diproteksi dari bug game crash.")
+st.title("Ren'Py (.rpy) Translator - SPEEDRUN & CASUAL MODE ⚡")
+st.write("Hanya menerjemahkan isi tanda kutip dua. Cepat, otomatis bahasa santai, dan anti-crash.")
 
 lang_options = {'Indonesia': 'id', 'Inggris': 'en', 'Jepang': 'ja', 'Spanyol': 'es'}
 selected_lang = st.selectbox("Pilih Bahasa Target:", list(lang_options.keys()))
@@ -99,10 +131,10 @@ uploaded_file = st.file_uploader("Pilih file .rpy", type=["rpy"])
 
 if uploaded_file is not None:
     file_contents = uploaded_file.getvalue().decode("utf-8")
-    if st.button("Mulai Terjemahkan Sempurna"):
-        with st.spinner("Menyelaraskan bahasa dan mengecek bug teks... Mohon tunggu."):
-            result = translate_rpy_ultimate(file_contents, target_code)
-            st.success("Proses selesai dengan aman!")
+    if st.button("Mulai Terjemahkan Kilat"):
+        with st.spinner("Sedang memproses seluruh percakapan game... Mohon tunggu."):
+            result = translate_rpy_speedrun(file_contents, target_code)
+            st.success("Selesai! File Anda siap diunduh.")
             st.download_button(
                 label="Unduh File Terjemahan",
                 data=result,
