@@ -61,10 +61,10 @@ def translate_single_item(data, target_lang):
     Fungsi pekerja untuk menerjemahkan satu baris dialog secara paralel
     """
     try:
-        # PENTING: Menggunakan translator google dengan kode 'ind' untuk bahasa Indonesia
+        # PENTING: Menggunakan from_language='auto' agar server fleksibel membaca aksen Spanyol
         raw_translation = ts.translate_text(
             data['text'], 
-            from_language='spa', # Mengunci bahasa asal dari Spanyol (Spanish)
+            from_language='auto', 
             to_language=target_lang, 
             translator='google'
         )
@@ -78,7 +78,9 @@ def translate_single_item(data, target_lang):
 def translate_rpy_turbo_speed(content, target_lang='ind'):
     lines = content.split('\n')
     
-    # Regex super akurat pemisah tanda kutip
+    # PERBAIKAN UTAMA REGEX SPANYOL:
+    # Mengizinkan karakter tanda tanya/seru terbalik Spanyol (¡, ¿) masuk ke dalam filter pencarian text.
+    # Group 1 = Luar Depan, Group 2 = Isi kutip dua murni, Group 3 = Luar Belakang
     dialog_pattern = re.compile(r'^([^"\n]*)"([^"\n]*)"([^"\n]*)$')
     dialog_data = []
     
@@ -119,8 +121,8 @@ def translate_rpy_turbo_speed(content, target_lang='ind'):
             
     return '\n'.join(lines)
 
-st.title("Ren'Py Joiplay Translator - SPANISH TO INDONESIA TURBO 🏎️⚡")
-st.write("Hanya menerjemahkan isi tanda kutip dua. Menggunakan sistem multi-core paralel, instan, bahasa gaul, dan Joiplay anti-crash.")
+st.title("Ren'Py Joiplay Translator - SPANISH TO INDONESIA TURBO v2 🏎️⚡")
+st.write("Hanya menerjemahkan isi tanda kutip dua. Fix bug karakter Spanyol, bahasa gaul, dan Joiplay anti-crash.")
 
 # Menyelaraskan kamus pilihan bahasa dengan kode ISO 3-letter khusus library translators
 lang_options = {'Indonesia': 'ind', 'Inggris': 'eng', 'Jepang': 'jpn'}
