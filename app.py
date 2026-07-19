@@ -28,4 +28,20 @@ def protect_and_clean(text):
     return text
 
 def make_it_casual(text):
-    kamus =
+    kamus = {"Anda": "kamu", "Saya": "aku", "Tidak": "nggak", "Sangat": "banget", "apa": "apaan"}
+    for k, v in kamus.items(): 
+        text = re.sub(r'\b' + k + r'\b', v, text, flags=re.IGNORECASE)
+    return text
+
+def run_translation(ai_type, ai_client=None):
+    if not uploaded_file: 
+        st.warning("Upload file dulu")
+        return
+        
+    with st.spinner(f"Lagi translate pake {ai_type}..."):
+        content = uploaded_file.read().decode('utf-8', errors='ignore')
+        lines = content.split('\n')
+        pattern = re.compile(r'^(\s*[a-zA-Z0-9_#]*\s*)"([^"]*?)"(.*)$')
+        output_lines = []
+        count = 0
+        progress = st.progress(0)
