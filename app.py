@@ -1,12 +1,24 @@
 import streamlit as st
 from deep_translator import GoogleTranslator
-import re, time, io
+import google.generativeai as genai
+from openai import OpenAI
+import re, time
 
-st.set_page_config(page_title="RenPy Translator", layout="wide")
-st.title("🌏 Translator.rpy Anti FC buat Joiplay")
+st.set_page_config(page_title="RenPy Translator 3in1", layout="centered")
+st.title("🌏 Translator .rpy Anti FC")
+st.caption("Pilih AI sesuai kebutuhan. Hasil langsung download")
 
-uploaded_file = st.file_uploader("Upload file.rpy kamu", type=["rpy"])
-target_lang = st.selectbox("Translate ke bahasa:", ["id", "en", "ja", "ko", "zh-CN"])
+uploaded_file = st.file_uploader("1. Upload file.rpy kamu", type=["rpy"])
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    use_google = st.button("Google Translate\nGRATIS")
+with col2:
+    gemini_key = st.text_input("Gemini API Key", type="password")
+    use_gemini = st.button("Gemini 1.5\nGRATIS")
+with col3:
+    openai_key = st.text_input("OpenAI API Key", type="password")
+    use_gpt = st.button("ChatGPT\nBAYAR")
 
 def protect_and_clean(text):
     tags = re.findall(r'\{.*?\}', text)
@@ -16,39 +28,4 @@ def protect_and_clean(text):
     return text
 
 def make_it_casual(text):
-    kamus = {r'\bAnda\b': 'kamu', r'\bSaya\b': 'aku', r'\bTidak\b': 'nggak', r'\bSangat\b': 'banget'}
-    for k, v in kamus.items(): text = re.sub(k, v, text, flags=re.IGNORECASE)
-    return text
-
-if uploaded_file is not None:
-    if st.button("Mulai Translate"):
-        with st.spinner("Lagi translate... 1-5 menit"):
-            content = uploaded_file.read().decode('utf-8', errors='ignore')
-            lines = content.split('\n')
-            pattern = re.compile(r'^(\s*[a-zA-Z0-9_#]*\s*)"([^"]*?)"(.*)$')
-            translator = GoogleTranslator(source='auto', target=target_lang)
-            count = 0
-            progress = st.progress(0)
-
-            for i, line in enumerate(lines):
-                m = pattern.match(line)
-                if m and m.group(2).strip():
-                    try:
-                        text = protect_and_clean(m.group(2))
-                        hasil = translator.translate(text)
-                        hasil = make_it_casual(hasil)
-                        lines[i] = f'{m.group(1)}"{hasil}"{m.group(3)}'
-                        count += 1
-                    except:
-                        time.sleep(2)
-                progress.progress(i / len(lines))
-
-            output = '\n'.join(lines)
-            st.success(f"SELESAI! {count} baris diterjemahkan")
-            
-            st.download_button(
-                label="Download Hasil.rpy",
-                data=output,
-                file_name="ID_" + uploaded_file.name,
-                mime="text/plain"
-    )
+    kamus =
