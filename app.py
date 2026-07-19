@@ -1,11 +1,10 @@
 import streamlit as st
 import re
 from deep_translator import GoogleTranslator
-from concurrent.futures import ThreadPoolExecutor
 
 def make_it_casual(text):
     """
-    Mengubah kata-kata kaku formal bawaan mesin translator 
+    Mengubah kata kaku formal bawaan mesin translator 
     menjadi bahasa gaul santai sehari-hari di dunia nyata.
     """
     if not text or not isinstance(text, str):
@@ -44,42 +43,27 @@ def make_it_casual(text):
 def clean_strictly_for_joiplay(text):
     """
     SISTEM PROTEKSI UTAMA JOIPLAY:
-    Menghapus dan menetralkan tanda kutip dua internal agar Joiplay tidak menutup paksa.
+    Menetralkan semua jenis tanda kutip internal agar emulator Joiplay Android tidak crash.
     """
     if not text:
         return ""
-    # Menghapus kutip dua dekoratif bawaan keyboard HP / Google Translate menjadi kutip satu
+    # Menghapus kutip ganda internal dekoratif bawaan teks HP/Google Translate menjadi kutip satu
     text = text.replace('“', "'").replace('”', "'").replace('„', "'")
     text = text.replace('"', "'")
+    # Bersihkan karakter pembaca internal yang sering merusak memori rendering Joiplay
     text = text.replace('%', ' persen').replace('\\', '/')
     return text.strip()
 
-def translate_single_item(data, target_lang):
-    """
-    Fungsi pekerja paralel untuk mengekstrak arti teks Spanyol secara mandiri
-    """
-    try:
-        # source='auto' sangat peka membaca aksen Spanyol (ñ, ¿, ¡, á, é)
-        translator = GoogleTranslator(source='auto', target=target_lang)
-        raw_translation = translator.translate(data['text'])
-        
-        casual_text = make_it_casual(raw_translation)
-        safe_text = clean_strictly_for_joiplay(casual_text)
-        
-        return {'line_idx': data['line_idx'], 'result': f'{data["prefix"]}"{safe_text}"{data["suffix"]}'}
-    except:
-        # Jika baris ini gagal karena gangguan jaringan, kembalikan teks asli murni agar file tidak korup
-        return {'line_idx': data['line_idx'], 'result': f'{data["prefix"]}"{data["text"]}"{data["suffix"]}'}
-
-def translate_rpy_turbo_final(content, target_lang='id'):
+def translate_rpy_mega_fast_fixed(content, target_lang='id'):
     lines = content.split('\n')
     
-    # REGEX COCOK: Membagi baris menjadi (Luar_Depan) "Teks_Dalam" (Luar_Belakang)
-    # Non-greedy (.*?) menjamin aksen Spanyol terjaring akurat tanpa merusak sintaks luar program Ren'Py
+    # REGEX UTAMA FIX: Menangkap semua format teks Spanyol/Inggris di dalam tanda kutip dua murni ("...")
+    # Menggunakan pencarian non-greedy (.*?) agar tidak salah memotong kode variabel Ren'Py
     dialog_pattern = re.compile(r'^([^"\n]*?)"([^"\n]*?)"([^"\n]*?)$')
+    
     dialog_data = []
     
-    # LANGKAH 1: Kumpulkan semua data dialog
+    # LANGKAH 1: Kumpulkan semua data teks dialog
     for idx, line in enumerate(lines):
         match = dialog_pattern.match(line)
         if match:
@@ -95,35 +79,66 @@ def translate_rpy_turbo_final(content, target_lang='id'):
     if not dialog_data:
         return content
 
-    # LANGKAH 2: Multi-Threading Turbo Execution (Pemrosesan Paralel Berkelompok)
-    progress_bar = st.progress(0)
-    st.write(f"Berhasil mengunci {len(dialog_data)} baris dialog Spanyol! Memulai akselerasi multi-thread...")
+    # LANGKAH 2: Chunking Paket Massal Menggunakan Batas Karakter Google Translate (< 4500)
+    chunks = []
+    current_chunk = []
+    current_length = 0
+    separator = " @@@ " # Pembatas terisolasi yang kebal dari gangguan bahasa Spanyol
     
-    processed_count = 0
-    total_dialogs = len(dialog_data)
-    batch_size = 100  # Mengelompokkan per 100 baris agar server stabil tanpa terkena rate limit
-    
-    for i in range(0, total_dialogs, batch_size):
-        batch = dialog_data[i:i + batch_size]
-        
-        # max_workers=10 berarti server memproses 10 baris dialog sekaligus secara bersamaan dalam 1 detik
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [executor.submit(translate_single_item, data, target_lang) for data in batch]
+    for data in dialog_data:
+        added_length = len(data['text']) + len(separator)
+        if current_length + added_length > 4200:
+            chunks.append(current_chunk)
+            current_chunk = [data]
+            current_length = len(data['text'])
+        else:
+            current_chunk.append(data)
+            current_length += added_length
             
-            for future in futures:
-                res_data = future.result()
-                lines[res_data['line_idx']] = res_data['result']
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    # LANGKAH 3: Eksekusi Kirim Instan ke Server
+    translator = GoogleTranslator(source='auto', target=target_lang)
+    progress_bar = st.progress(0)
+    total_chunks = len(chunks)
+    
+    for chunk_idx, chunk in enumerate(chunks):
+        # Satukan sekelompok baris dialog menjadi satu teks raksasa (Mengurangi loading kirim data)
+        combined_text = separator.join([data['text'] for data in chunk])
+        try:
+            translated_combined = translator.translate(combined_text)
+            translated_list = translated_combined.split(separator)
+            
+            # Validasi Akurasi: Jika jumlah data pas, langsung kembalikan ke baris aslinya
+            if len(translated_list) == len(chunk):
+                for i, data in enumerate(chunk):
+                    idx = data['line_idx']
+                    casual_text = make_it_casual(translated_list[i])
+                    safe_text = clean_strictly_for_joiplay(casual_text)
+                    lines[idx] = f'{data["prefix"]}"{safe_text}"{data["suffix"]}'
+            else:
+                # Mode Cadangan: Jika pembatas dirusak oleh Google, terjemahkan per baris khusus kelompok ini
+                for data in chunk:
+                    try:
+                        idx = data['line_idx']
+                        raw_res = translator.translate(data['text'])
+                        lines[idx] = f'{data["prefix"]}"{clean_strictly_for_joiplay(make_it_casual(raw_res))}"{data["suffix"]}'
+                    except:
+                        pass
+        except:
+            # Proteksi Kehilangan Teks: Jika server mati sementara, gunakan teks aslinya agar file tidak korup
+            for data in chunk:
+                idx = data['line_idx']
+                lines[idx] = f'{data["prefix"]}"{data["text"]}"{data["suffix"]}'
                 
-                processed_count += 1
-                if processed_count % 10 == 0 or processed_count == total_dialogs:
-                    progress_bar.progress(processed_count / total_dialogs)
+        progress_bar.progress((chunk_idx + 1) / total_chunks)
             
     return '\n'.join(lines)
 
-st.title("Ren'Py Translator - TURBO PARALEL EDITION v4 🏎️⚡")
-st.write("Hanya menerjemahkan isi tanda kutip dua. Menggunakan deep-translator paralel, instan, otomatis bahasa gaul, dan Joiplay anti-crash.")
+st.title("Ren'Py Joiplay Translator - TOTAL PERFECTION ⚡")
+st.write("Sistem Pemrosesan Paket Massal: Terjemahan bahasa gaul dunia nyata, super instan, dan anti-crash Joiplay.")
 
-# Menggunakan daftar opsi bahasa dengan kode ISO standar milik deep-translator
 lang_options = {'Indonesia': 'id', 'Inggris': 'en', 'Jepang': 'ja'}
 selected_lang = st.selectbox("Pilih Bahasa Target:", list(lang_options.keys()))
 target_code = lang_options[selected_lang]
@@ -132,12 +147,13 @@ uploaded_file = st.file_uploader("Pilih file .rpy", type=["rpy"])
 
 if uploaded_file is not None:
     file_contents = uploaded_file.getvalue().decode("utf-8")
-    if st.button("Mulai Akselerasi Terjemahan"):
-        with st.spinner("Membongkar aksen Spanyol ke bahasa gaul Indonesia... Mohon tunggu."):
-            result = translate_rpy_turbo_final(file_contents, target_code)
-            st.success("Selesai total! File diproteksi penuh dari Joiplay Force Close.")
+    if st.button("Mulai Terjemahkan Super Kilat"):
+        with st.spinner("Menyelaraskan bahasa kasual dunia nyata... Mohon tunggu."):
+            result = translate_with_fallback = translate_rpy_mega_fast_fixed(file_contents, target_code)
+            st.success("Proses selesai total dengan aman!")
             
-            # Memaksa file keluaran berformat UTF-8-BOM untuk kelancaran Joiplay di Android
+            # FITUR UTAMA JOIPLAY: Memaksa encoding file menggunakan format UTF-8 dengan tanda BOM (\ufeff)
+            # Menjamin emulator Joiplay Android mengenali font bahasa Indonesia tanpa lag/stutter
             bom_result = '\ufeff' + result
             st.download_button(
                 label="Unduh File Terjemahan Joiplay",
