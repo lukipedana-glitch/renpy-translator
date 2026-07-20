@@ -1,65 +1,60 @@
 import streamlit as st
 import re
+import time
 from deep_translator import GoogleTranslator
 
-st.set_page_config(page_title="ES to ID Anti Crash V7.1")
-st.title("ES to ID Translator V7.1 - Anti Joyplay FC")
-st.warning("Ini khusus fix crash pas dialog. Tag dan \\n dijamin aman 100%")
+st.set_page_config(page_title="ES to ID Anti Crash V7.2")
+st.title("ES to ID Translator V7.2 - Anti Joyplay FC")
 
-file = st.file_uploader("Upload file BAHASA SPANYOL .rpy", type=["rpy"])
+file = st.file_uploader("1. Upload file BAHASA SPANYOL .rpy", type=["rpy"])
 
-def protect_tags(text):
-    # Proteksi: {tag} [/tag] [ ] \n \t \" ... ~
-    return re.findall(r'\{[^}]*\}|\[[^\]]*\]|\\[nrt"\\]|\.\.|~', text)
-
-if file and st.button("TERJEMAHKAN KE INDONESIA"):
-    content = file.read().decode('utf-8', errors='ignore')
-    lines = content.split('\n')
-    out = []
-    crash_log = []
-
-    for idx, line in enumerate(lines):
-        m = re.match(r'^(\s*old\s*)"((?:[^"\\]|\\.)*)"(.*)$', line)
-        m2 = re.match(r'^(\s*new\s*)"((?:[^"\\]|\\.)*)"(.*)$', line)
-        
-        if m or m2:
-            prefix = m.group(1) if m else m2.group(1)
-            text = m.group(2) if m else m2.group(2)
-            suffix = m.group(3) if m else m2.group(3)
-            
-            # 1. Simpen tag asli
-            tags = protect_tags(text)
-            temp = text
-            for i,t in enumerate(tags):
-                temp = temp.replace(t, f'@@P{i}@@')
-            
-            # 2. Translate
-            try:
-                hasil = GoogleTranslator(source='es', target='id').translate(temp) if temp.strip() else temp
-                # 3. Balikin tag
-                for i,t in enumerate(tags):
-                    hasil = hasil.replace(f'@@P{i}@@', t)
-            except:
-                hasil = text
-                crash_log.append(f"Line {idx+1}: Gagal translate, pake teks asli")
-            
-            # 4. CEK KESEHATAN TAG - PENTING BANGET BUAT ANTI CRASH
-            buka = hasil.count('{')
-            tutup = hasil.count('}')
-            if buka != tutup:
-                crash_log.append(f"Line {idx+1}: Tag rusak! {buka} buka vs {tutup} tutup. Dibenerin manual")
-                # kalau rusak, balikin ke teks asli biar gak crash
-                hasil = text 
-
-            out.append(f'{prefix}"{hasil}"{suffix}')
-        else:
-            out.append(line)
-            
-    st.success("Selesai!")
-    if crash_log:
-        with st.expander("Lihat Log Perbaikan"):
-            st.write("\n".join(crash_log))
+if file:
+    st.success(f"File terbaca: {file.name}")
     
-    st.download_button("DOWNLOAD FILE ID - ANTI CRASH", '\n'.join(out), "ID_" + file.name)
+if file and st.button("2. KLIK UNTUK TERJEMAHKAN KE INDONESIA", type="primary"):
+    with st.spinner("Lagi nerjemahin... jangan di close ya"):
+        try:
+            content = file.read().decode('utf-8', errors='ignore')
+            lines = content.split('\n')
+            out = []
+            count = 0
 
-st.info("Setelah download: Pindah ke game/tl/Indonesian > Hapus cache Joyplay > Test lagi")
+            for idx, line in enumerate(lines):
+                m = re.match(r'^(\s*old\s*)"((?:[^"\\]|\\.)*)"(.*)$', line)
+                m2 = re.match(r'^(\s*new\s*)"((?:[^"\\]|\\.)*)"(.*)$', line)
+                
+                if m or m2:
+                    prefix = m.group(1) if m else m2.group(1)
+                    text = m.group(2) if m else m2.group(2)
+                    suffix = m.group(3) if m else m2.group(3)
+                    
+                    # Proteksi tag
+                    tags = re.findall(r'\{[^}]*\}|\[[^\]]*\]|\\[nrt"\\]|\.\.|~', text)
+                    temp = text
+                    for i,t in enumerate(tags):
+                        temp = temp.replace(t, f'@@P{i}@@')
+                    
+                    # Translate ES -> ID
+                    if temp.strip():
+                        hasil = GoogleTranslator(source='es', target='id').translate(temp)
+                        for i,t in enumerate(tags):
+                            hasil = hasil.replace(f'@@P{i}@@', t)
+                        count += 1
+                    else:
+                        hasil = text
+
+                    out.append(f'{prefix}"{hasil}"{suffix}')
+                else:
+                    out.append(line)
+                
+                time.sleep(0.01) # biar gak ke ban google
+
+            st.success(f"Selesai! {count} baris berhasil diterjemahkan")
+            st.download_button("DOWNLOAD FILE ID", '\n'.join(out), "ID_" + file.name)
+
+        except Exception as e:
+            st.error(f"GAGAL: {e}")
+            st.info("Solusi: Coba restart streamlit. Ketik: streamlit run app.py")
+
+st.divider()
+st.write("Tips: Kalau masih stuck, ganti jaringan / pake VPN. Google kadang blokir")
