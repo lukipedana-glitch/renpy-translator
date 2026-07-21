@@ -1,16 +1,15 @@
 import streamlit as st
 import re
+import time
 from deep_translator import GoogleTranslator
 
-st.set_page_config(page_title="Universal to ID V7.3", layout="centered")
-st.title("Universal to ID Translator V7.3 - Anti Bug 100%")
-st.write("Terjemah semua bahasa -> Indonesia. Hanya teks di dalam \"...\"")
-st.error("GARANSI: Tag {sc=3} \\n... ~ TIDAK AKAN PERNAH RUSAK")
+st.set_page_config(page_title="Universal to ID V7.5")
+st.title("Universal to ID Translator V7.5 - Final")
+st.write("Terjemah semua bahasa -> Indonesia. 100% jaga tag { } \\n...")
 
-file = st.file_uploader("Upload file.rpy bahasa apa aja", type=["rpy"])
+file = st.file_uploader("Upload file.rpy", type=["rpy"])
 
-def protect_and_split(text):
-    # 1. Proteksi semua yg gaboleh keubah
+def protect(text):
     tags = re.findall(r'\{[^}]*\}|\[[^\]]*\]|\\[nrt"\\]|\.\.|~|none', text, flags=re.IGNORECASE)
     temp = text
     for i,t in enumerate(tags):
@@ -18,55 +17,71 @@ def protect_and_split(text):
     return temp, tags
 
 def unprotect(text, tags):
-    # 2. Balikin semua yg diproteksi
     for i,t in enumerate(tags):
         text = text.replace(f'@@P{i}@@', t)
     return text
 
-if file and st.button("TERJEMAHKAN SEMUA KE INDONESIA", type="primary"):
+if file and st.button("TERJEMAHKAN KE INDONESIA", type="primary", use_container_width=True):
     content = file.read().decode('utf-8', errors='ignore')
     lines = content.split('\n')
-    out = []
-    batch = [] # buat translate cepat
+    batch = []
     batch_index = []
-    translated_count = 0
+    error_log = []
 
-    progress = st.progress(0, text="Scan file...")
+    with st.status("1. Scan file...") as s:
+        for idx, line in enumerate(lines):
+            m = re.match(r'^(\s*\w+\s*)"((?:[^"\\]|\\.)*)"(.*)$', line)
+            if m:
+                prefix, text, suffix = m.groups()
+                if text.strip() and text.strip().lower()!= "none": # SKIP none & kosong
+                    clean_text, tags = protect(text)
+                    if clean_text.strip():
+                        batch.append(clean_text)
+                        batch_index.append((idx, prefix, tags, suffix))
+        s.update(label=f"2. Nemu {len(batch)} baris. Estimasi: {len(batch)//100 + 1} menit", state="running")
 
-    # LANGKAH 1: Kumpulin semua yg mau di translate dulu biar cepat
-    for idx, line in enumerate(lines):
-        m = re.match(r'^(\s*\w+\s*)"((?:[^"\\]|\\.)*)"(.*)$', line) # tangkep old, new, s, dll
-        if m:
-            prefix, text, suffix = m.groups()
-            if text.strip() and text.strip().lower()!= "none": # SKIP "none"
-                clean_text, tags = protect_and_split(text)
-                if clean_text.strip():
-                    batch.append(clean_text)
-                    batch_index.append((idx, prefix, tags, suffix))
-        progress.progress((idx + 1) / len(lines))
-
-    # LANGKAH 2: Translate sekaligus biar cepat 10x lipat
-    if batch:
-        st.info(f"Nemu {len(batch)} baris dialog. Lagi translate...")
-        try:
-            results = GoogleTranslator(source='auto', target='id').translate_batch(batch)
-        except:
-            st.warning("Batch gagal. Pake translate 1-1 lebih lambat")
-            results = [GoogleTranslator(source='auto', target='id').translate(t) for t in batch]
+    chunk_size = 100 # naikin biar lebih cepat
+    progress = st.progress(0)
+    
+    for i in range(0, len(batch), chunk_size):
+        chunk = batch[i:i+chunk_size]
+        chunk_idx = batch_index[i:i+chunk_size]
         
-        # LANGKAH 3: Masukin hasil ke baris semula
-        for (idx, prefix, tags, suffix), result in zip(batch_index, results):
-            final_text = unprotect(result, tags) # Balikin tag
-            lines[idx] = f'{prefix}"{final_text}"{suffix}'
-            translated_count += 1
+        for attempt in range(3):
+            try:
+                results = GoogleTranslator(source='auto', target='id').translate_batch(chunk)
+                break
+            except Exception as e:
+                if attempt == 2: 
+                    error_log.append(f"Chunk {i}-{i+chunk_size} gagal. Pake teks asli")
+                    results = chunk
+                time.sleep(5)
+        
+        for (idx, prefix, tags, suffix), result in zip(chunk_idx, results):
+            try:
+                final_text = unprotect(result, tags)
+                # Cek kesehatan tag
+                if final_text.count('{')!= final_text.count('}'):
+                    final_text = unprotect(batch[batch_index.index((idx, prefix, tags, suffix))], tags)
+                    error_log.append(f"Line {idx+1}: Tag rusak. Pake teks asli")
+                lines[idx] = f'{prefix}"{final_text}"{suffix}'
+            except:
+                error_log.append(f"Line {idx+1}: Error saat gabung")
+        
+        progress.progress((i + chunk_size) / len(batch))
+        time.sleep(1.5)
+
+    st.success(f"Selesai! {len(batch)} baris diproses")
     
-    st.success(f"Selesai! {translated_count} baris diterjemahkan. Tag aman 100%")
-    
+    if error_log:
+        with st.expander("Lihat Log Error"):
+            st.code("\n".join(error_log))
+
     st.download_button(
-        "DOWNLOAD FILE ID FINAL", 
+        "DOWNLOAD FILE ID V7.5", 
         '\n'.join(lines), 
-        "ID_" + file.name
+        "ID_V75_" + file.name,
+        use_container_width=True
     )
 
-st.divider()
-st.markdown("**Peraturan V7.3:**\n1. `none` = di skip\n2. `{sc=3}` `\\n` `...` `~` = dikunci\n3. Cuma translate isi `\"...\"`\n4. Bahasa auto detect")
+st.caption("Catatan: {sc=3} \\n... none TIDAK AKAN PERNAH BERUBAH")
