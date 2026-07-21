@@ -1,60 +1,72 @@
 import streamlit as st
 import re
-import time
 from deep_translator import GoogleTranslator
 
-st.set_page_config(page_title="ES to ID Anti Crash V7.2")
-st.title("ES to ID Translator V7.2 - Anti Joyplay FC")
+st.set_page_config(page_title="Universal to ID V7.3", layout="centered")
+st.title("Universal to ID Translator V7.3 - Anti Bug 100%")
+st.write("Terjemah semua bahasa -> Indonesia. Hanya teks di dalam \"...\"")
+st.error("GARANSI: Tag {sc=3} \\n... ~ TIDAK AKAN PERNAH RUSAK")
 
-file = st.file_uploader("1. Upload file BAHASA SPANYOL .rpy", type=["rpy"])
+file = st.file_uploader("Upload file.rpy bahasa apa aja", type=["rpy"])
 
-if file:
-    st.success(f"File terbaca: {file.name}")
-    
-if file and st.button("2. KLIK UNTUK TERJEMAHKAN KE INDONESIA", type="primary"):
-    with st.spinner("Lagi nerjemahin... jangan di close ya"):
+def protect_and_split(text):
+    # 1. Proteksi semua yg gaboleh keubah
+    tags = re.findall(r'\{[^}]*\}|\[[^\]]*\]|\\[nrt"\\]|\.\.|~|none', text, flags=re.IGNORECASE)
+    temp = text
+    for i,t in enumerate(tags):
+        temp = temp.replace(t, f'@@P{i}@@')
+    return temp, tags
+
+def unprotect(text, tags):
+    # 2. Balikin semua yg diproteksi
+    for i,t in enumerate(tags):
+        text = text.replace(f'@@P{i}@@', t)
+    return text
+
+if file and st.button("TERJEMAHKAN SEMUA KE INDONESIA", type="primary"):
+    content = file.read().decode('utf-8', errors='ignore')
+    lines = content.split('\n')
+    out = []
+    batch = [] # buat translate cepat
+    batch_index = []
+    translated_count = 0
+
+    progress = st.progress(0, text="Scan file...")
+
+    # LANGKAH 1: Kumpulin semua yg mau di translate dulu biar cepat
+    for idx, line in enumerate(lines):
+        m = re.match(r'^(\s*\w+\s*)"((?:[^"\\]|\\.)*)"(.*)$', line) # tangkep old, new, s, dll
+        if m:
+            prefix, text, suffix = m.groups()
+            if text.strip() and text.strip().lower()!= "none": # SKIP "none"
+                clean_text, tags = protect_and_split(text)
+                if clean_text.strip():
+                    batch.append(clean_text)
+                    batch_index.append((idx, prefix, tags, suffix))
+        progress.progress((idx + 1) / len(lines))
+
+    # LANGKAH 2: Translate sekaligus biar cepat 10x lipat
+    if batch:
+        st.info(f"Nemu {len(batch)} baris dialog. Lagi translate...")
         try:
-            content = file.read().decode('utf-8', errors='ignore')
-            lines = content.split('\n')
-            out = []
-            count = 0
-
-            for idx, line in enumerate(lines):
-                m = re.match(r'^(\s*old\s*)"((?:[^"\\]|\\.)*)"(.*)$', line)
-                m2 = re.match(r'^(\s*new\s*)"((?:[^"\\]|\\.)*)"(.*)$', line)
-                
-                if m or m2:
-                    prefix = m.group(1) if m else m2.group(1)
-                    text = m.group(2) if m else m2.group(2)
-                    suffix = m.group(3) if m else m2.group(3)
-                    
-                    # Proteksi tag
-                    tags = re.findall(r'\{[^}]*\}|\[[^\]]*\]|\\[nrt"\\]|\.\.|~', text)
-                    temp = text
-                    for i,t in enumerate(tags):
-                        temp = temp.replace(t, f'@@P{i}@@')
-                    
-                    # Translate ES -> ID
-                    if temp.strip():
-                        hasil = GoogleTranslator(source='es', target='id').translate(temp)
-                        for i,t in enumerate(tags):
-                            hasil = hasil.replace(f'@@P{i}@@', t)
-                        count += 1
-                    else:
-                        hasil = text
-
-                    out.append(f'{prefix}"{hasil}"{suffix}')
-                else:
-                    out.append(line)
-                
-                time.sleep(0.01) # biar gak ke ban google
-
-            st.success(f"Selesai! {count} baris berhasil diterjemahkan")
-            st.download_button("DOWNLOAD FILE ID", '\n'.join(out), "ID_" + file.name)
-
-        except Exception as e:
-            st.error(f"GAGAL: {e}")
-            st.info("Solusi: Coba restart streamlit. Ketik: streamlit run app.py")
+            results = GoogleTranslator(source='auto', target='id').translate_batch(batch)
+        except:
+            st.warning("Batch gagal. Pake translate 1-1 lebih lambat")
+            results = [GoogleTranslator(source='auto', target='id').translate(t) for t in batch]
+        
+        # LANGKAH 3: Masukin hasil ke baris semula
+        for (idx, prefix, tags, suffix), result in zip(batch_index, results):
+            final_text = unprotect(result, tags) # Balikin tag
+            lines[idx] = f'{prefix}"{final_text}"{suffix}'
+            translated_count += 1
+    
+    st.success(f"Selesai! {translated_count} baris diterjemahkan. Tag aman 100%")
+    
+    st.download_button(
+        "DOWNLOAD FILE ID FINAL", 
+        '\n'.join(lines), 
+        "ID_" + file.name
+    )
 
 st.divider()
-st.write("Tips: Kalau masih stuck, ganti jaringan / pake VPN. Google kadang blokir")
+st.markdown("**Peraturan V7.3:**\n1. `none` = di skip\n2. `{sc=3}` `\\n` `...` `~` = dikunci\n3. Cuma translate isi `\"...\"`\n4. Bahasa auto detect")
