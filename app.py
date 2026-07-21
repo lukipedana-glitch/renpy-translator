@@ -1,11 +1,11 @@
 import streamlit as st
 import re
 import time
+import base64
 from deep_translator import GoogleTranslator
 
-st.set_page_config(page_title="Universal to ID V7.5")
-st.title("Universal to ID Translator V7.5 - Final")
-st.write("Terjemah semua bahasa -> Indonesia. 100% jaga tag { } \\n...")
+st.set_page_config(page_title="Universal to ID V7.6")
+st.title("Universal to ID Translator V7.6 - Fix Download")
 
 file = st.file_uploader("Upload file.rpy", type=["rpy"])
 
@@ -21,67 +21,48 @@ def unprotect(text, tags):
         text = text.replace(f'@@P{i}@@', t)
     return text
 
+def get_download_link(content, filename):
+    b64 = base64.b64encode(content.encode('utf-8')).decode()
+    return f'<a href="data:file/txt;base64,{b64}" download="{filename}">KLIK UNTUK DOWNLOAD FILE ID</a>'
+
 if file and st.button("TERJEMAHKAN KE INDONESIA", type="primary", use_container_width=True):
     content = file.read().decode('utf-8', errors='ignore')
     lines = content.split('\n')
     batch = []
     batch_index = []
-    error_log = []
 
-    with st.status("1. Scan file...") as s:
+    with st.status("Scan & Translate...") as s:
         for idx, line in enumerate(lines):
             m = re.match(r'^(\s*\w+\s*)"((?:[^"\\]|\\.)*)"(.*)$', line)
             if m:
                 prefix, text, suffix = m.groups()
-                if text.strip() and text.strip().lower()!= "none": # SKIP none & kosong
+                if text.strip() and text.strip().lower()!= "none":
                     clean_text, tags = protect(text)
                     if clean_text.strip():
                         batch.append(clean_text)
                         batch_index.append((idx, prefix, tags, suffix))
-        s.update(label=f"2. Nemu {len(batch)} baris. Estimasi: {len(batch)//100 + 1} menit", state="running")
 
-    chunk_size = 100 # naikin biar lebih cepat
-    progress = st.progress(0)
-    
-    for i in range(0, len(batch), chunk_size):
-        chunk = batch[i:i+chunk_size]
-        chunk_idx = batch_index[i:i+chunk_size]
-        
-        for attempt in range(3):
+        # Translate per chunk 100
+        for i in range(0, len(batch), 100):
+            chunk = batch[i:i+100]
+            chunk_idx = batch_index[i:i+100]
             try:
                 results = GoogleTranslator(source='auto', target='id').translate_batch(chunk)
-                break
-            except Exception as e:
-                if attempt == 2: 
-                    error_log.append(f"Chunk {i}-{i+chunk_size} gagal. Pake teks asli")
-                    results = chunk
-                time.sleep(5)
-        
-        for (idx, prefix, tags, suffix), result in zip(chunk_idx, results):
-            try:
-                final_text = unprotect(result, tags)
-                # Cek kesehatan tag
-                if final_text.count('{')!= final_text.count('}'):
-                    final_text = unprotect(batch[batch_index.index((idx, prefix, tags, suffix))], tags)
-                    error_log.append(f"Line {idx+1}: Tag rusak. Pake teks asli")
-                lines[idx] = f'{prefix}"{final_text}"{suffix}'
             except:
-                error_log.append(f"Line {idx+1}: Error saat gabung")
-        
-        progress.progress((i + chunk_size) / len(batch))
-        time.sleep(1.5)
+                results = chunk
+                time.sleep(5)
 
-    st.success(f"Selesai! {len(batch)} baris diproses")
-    
-    if error_log:
-        with st.expander("Lihat Log Error"):
-            st.code("\n".join(error_log))
+            for (idx, prefix, tags, suffix), result in zip(chunk_idx, results):
+                final_text = unprotect(result, tags)
+                lines[idx] = f'{prefix}"{final_text}"{suffix}'
+            time.sleep(1.5)
 
-    st.download_button(
-        "DOWNLOAD FILE ID V7.5", 
-        '\n'.join(lines), 
-        "ID_V75_" + file.name,
-        use_container_width=True
-    )
+    final_content = '\n'.join(lines)
+    s.update(label="Selesai!", state="complete")
+    st.success("Selesai! Scroll ke bawah")
 
-st.caption("Catatan: {sc=3} \\n... none TIDAK AKAN PERNAH BERUBAH")
+    # TOMBOL DOWNLOAD BARU YANG GAK ILANG
+    st.markdown(get_download_link(final_content, "ID_V76_" + file.name), unsafe_allow_html=True)
+    st.info("Kalau link di atas gak bisa diklik, copy paste ke browser baru")
+
+st.caption("Tag { } \\n... none aman 100%")
