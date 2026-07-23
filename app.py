@@ -4,13 +4,14 @@ import time
 import base64
 from deep_translator import GoogleTranslator
 
-st.set_page_config(page_title="Universal to ID V7.6")
-st.title("Universal to ID Translator V7.6 - Fix Download")
+st.set_page_config(page_title="Universal to ID V7.8")
+st.title("Universal to ID V7.8 - Support \"\\\"")
+st.error("HANYA TEKS DALAM \"...\" YANG DITERJEMAHKAN. Termasuk \"\\\" ")
 
 file = st.file_uploader("Upload file.rpy", type=["rpy"])
 
 def protect(text):
-    tags = re.findall(r'\{[^}]*\}|\[[^\]]*\]|\\[nrt"\\]|\.\.|~|none', text, flags=re.IGNORECASE)
+    tags = re.findall(r'\{[^}]*\}|\[[^\]]*\]|\\[nrtw"\\]|\.\.|~|\bnone\b', text, flags=re.IGNORECASE)
     temp = text
     for i,t in enumerate(tags):
         temp = temp.replace(t, f'@@P{i}@@')
@@ -30,39 +31,47 @@ if file and st.button("TERJEMAHKAN KE INDONESIA", type="primary", use_container_
     lines = content.split('\n')
     batch = []
     batch_index = []
+    skipped = 0
 
-    with st.status("Scan & Translate...") as s:
+    with st.status("1. Scan support \"\\\"...") as s:
         for idx, line in enumerate(lines):
-            m = re.match(r'^(\s*\w+\s*)"((?:[^"\\]|\\.)*)"(.*)$', line)
-            if m:
-                prefix, text, suffix = m.groups()
-                if text.strip() and text.strip().lower()!= "none":
-                    clean_text, tags = protect(text)
-                    if clean_text.strip():
-                        batch.append(clean_text)
-                        batch_index.append((idx, prefix, tags, suffix))
+            # REGEX BARU: BISA BACA \" DI DALEM
+            matches = re.finditer(r'"((?:[^"\\]|\\.)*)"', line)
+            for m in matches:
+                original_text = m.group(1)
+                if not original_text.strip() or original_text.strip().lower() == "none":
+                    skipped += 1
+                    continue
+                clean_text, tags = protect(original_text)
+                if clean_text.strip():
+                    batch.append(clean_text)
+                    batch_index.append((idx, m.start(1), m.end(1), tags))
 
-        # Translate per chunk 100
-        for i in range(0, len(batch), 100):
-            chunk = batch[i:i+100]
-            chunk_idx = batch_index[i:i+100]
-            try:
-                results = GoogleTranslator(source='auto', target='id').translate_batch(chunk)
-            except:
-                results = chunk
-                time.sleep(5)
+        s.update(label=f"2. Nemu {len(batch)} teks. Skip {skipped}", state="running")
 
-            for (idx, prefix, tags, suffix), result in zip(chunk_idx, results):
-                final_text = unprotect(result, tags)
-                lines[idx] = f'{prefix}"{final_text}"{suffix}'
-            time.sleep(1.5)
+    # TRANSLATE
+    progress = st.progress(0)
+    for i in range(0, len(batch), 100):
+        chunk = batch[i:i+100]
+        chunk_idx = batch_index[i:i+100]
+        try:
+            results = GoogleTranslator(source='auto', target='id').translate_batch(chunk)
+        except:
+            results = chunk
+            time.sleep(5)
+
+        for (idx, start, end, tags), result in zip(chunk_idx, results):
+            final_text = unprotect(result, tags)
+            line = lines[idx]
+            lines[idx] = line[:start+1] + final_text + line[end+1:]
+
+        progress.progress((i + 100) / len(batch))
+        time.sleep(1.5)
 
     final_content = '\n'.join(lines)
     s.update(label="Selesai!", state="complete")
-    st.success("Selesai! Scroll ke bawah")
+    st.success(f"Selesai! {len(batch)} teks diterjemahkan")
 
-    # TOMBOL DOWNLOAD BARU YANG GAK ILANG
-    st.markdown(get_download_link(final_content, "ID_V76_" + file.name), unsafe_allow_html=True)
-    st.info("Kalau link di atas gak bisa diklik, copy paste ke browser baru")
+    st.markdown(get_download_link(final_content, "ID_V78_" + file.name), unsafe_allow_html=True)
 
-st.caption("Tag { } \\n... none aman 100%")
+st.caption("Contoh: e \"Dia bilang \\\"halo\\\"\" -> e \"Dia bilang \\\"halo\\\"\"")
