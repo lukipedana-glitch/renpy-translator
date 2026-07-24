@@ -1,51 +1,66 @@
 import streamlit as st
 import re
 import time
-import base64
 from deep_translator import GoogleTranslator
+from deep_translator.exceptions import NotValidPayload, TooManyRequests
 
-st.set_page_config(page_title="RenPy to ID V9.0", layout="wide")
-st.title("RenPy to ID V9.0 - CUMA TRANSLATE ISI \"...\"")
-st.caption("Tag {w} \\n [player] 100% aman. Gak akan ke translate")
+st.set_page_config(page_title="RenPy to ID V9.2", layout="wide")
+st.title("RenPy to ID V9.2 - TOMBOL DOWNLOAD PASTI ADA")
+st.caption("Cuma translate isi \"...\". Tag {w} \\n aman 100%")
 
 file = st.file_uploader("Upload file.rpy", type=["rpy"])
-
-def get_download_link(content, filename):
-    b64 = base64.b64encode(content.encode('utf-8', errors='ignore')).decode()
-    return f'<a href="data:file/txt;base64,{b64}" download="{filename}">📥 DOWNLOAD FILE ID</a>'
 
 if file and st.button("🚀 TERJEMAHKAN", type="primary", use_container_width=True):
     content = file.read().decode('utf-8', errors='ignore')
     lines = content.split('\n')
-    
-    jobs = [] # simpan semua teks yg di dalam "
+
+    jobs = []
     for idx, line in enumerate(lines):
-        for m in re.finditer(r'"((?:[^"\\]|\\.)*?)"', line): # cari isi petik
+        for m in re.finditer(r'"((?:[^"\\]|\\.)*?)"', line):
             original_text = m.group(1)
             if original_text.strip() and original_text.strip().lower()!= "none":
                 jobs.append((idx, m.start(1), m.end(1), original_text))
 
-    st.info(f"Nemu {len(jobs)} teks di dalam \"...\". Estimasi 10-15 menit")
+    if not jobs:
+        st.warning("Gak nemu teks di dalam \"...\"")
+        st.stop()
+
+    st.info(f"Nemu {len(jobs)} teks. Mulai translate...")
     results_all = []
-    progress = st.progress(0)
-    
-    # TRANSLATE BATCH 100 BIAR CEPET
-    for i in range(0, len(jobs), 100):
-        chunk = [j[3] for j in jobs[i:i+100]] # ambil teksnya doang
+    log_area = st.empty()
+
+    # TRANSLATE BATCH 50
+    for i in range(0, len(jobs), 50):
+        chunk_jobs = jobs[i:i+50]
+        chunk_texts = [j[3] for j in chunk_jobs]
+
+        log_area.text(f"Translate {i+1} - {i+len(chunk_jobs)} / {len(jobs)}")
+
         try:
-            res = GoogleTranslator(source='auto', target='id').translate_batch(chunk)
-            results_all.extend([str(r) if r else c for r, c in zip(res, chunk)])
-        except:
-            st.warning(f"Chunk {i//100 + 1} ke ban. Nunggu 15 detik")
-            time.sleep(15)
-            results_all.extend(chunk) # gagal = pake asli
-        progress.progress((i+100) / len(jobs))
-        time.sleep(1.5)
+            res = GoogleTranslator(source='auto', target='id').translate_batch(chunk_texts)
+            results_all.extend([str(r) if r else c for r, c in zip(res, chunk_texts)])
+        except (NotValidPayload, TooManyRequests, Exception):
+            log_area.warning(f"Batch {i//50 + 1} error. Pake teks asli")
+            results_all.extend(chunk_texts)
+
+        time.sleep(2)
+
+    log_area.text("Selesai translate. Menulis ke file...")
 
     # GANTI KE FILE DARI BELAKANG
     for (idx, start, end, original), result in sorted(zip(jobs, results_all), reverse=True):
         lines[idx] = lines[idx][:start+1] + result + lines[idx][end+1:]
 
     final_content = '\n'.join(lines)
-    st.success("✅ Selesai! Tag {w} \\n aman 100%")
-    st.markdown(get_download_link(final_content, "ID_V90_" + file.name), unsafe_allow_html=True)
+    st.success("✅ Selesai Diterjemahkan!")
+
+    # TOMBOL DOWNLOAD BARU - INI YG PASTI MUNCUL
+    st.download_button(
+        label="📥 KLIK UNTUK DOWNLOAD FILE ID",
+        data=final_content.encode('utf-8'),
+        file_name="ID_V92_" + file.name,
+        mime="text/plain",
+        use_container_width=True
+    )
+
+    st.code(final_content[:500], language="text") # preview 500 karakter pertama
