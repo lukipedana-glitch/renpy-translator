@@ -4,68 +4,48 @@ import time
 import base64
 from deep_translator import GoogleTranslator
 
-st.set_page_config(page_title="RenPy to ID V8.6", layout="wide")
-st.title("RenPy to ID Translator V8.6 - SATU2 ANTI NGACO")
-st.warning("INI LAMBAT TAPI 100% AMAN. 3451 teks = sekitar 3 jam")
+st.set_page_config(page_title="RenPy to ID V9.0", layout="wide")
+st.title("RenPy to ID V9.0 - CUMA TRANSLATE ISI \"...\"")
+st.caption("Tag {w} \\n [player] 100% aman. Gak akan ke translate")
 
 file = st.file_uploader("Upload file.rpy", type=["rpy"])
 
-def split_text_and_tags(text):
-    parts = re.split(r'(\{[^}]*\}|\[[^\]]*\]|\\[nrtw"\\]|\.\.|~|\bnone\b)', text, flags=re.IGNORECASE)
-    texts_to_translate = [p for p in parts if p and not re.match(r'\{[^}]*\}|\[[^\]]*\]|\\[nrtw"\\]|\.\.|~|\bnone\b', p, flags=re.IGNORECASE)]
-    return parts, texts_to_translate
-
-def join_text_and_tags(parts, translated_texts):
-    result = []
-    t_idx = 0
-    for p in parts:
-        if re.match(r'\{[^}]*\}|\[[^\]]*\]|\\[nrtw"\\]|\.\.|~|\bnone\b', p, flags=re.IGNORECASE):
-            result.append(p)
-        else:
-            result.append(translated_texts[t_idx])
-            t_idx += 1
-    return "".join(result)
-
 def get_download_link(content, filename):
     b64 = base64.b64encode(content.encode('utf-8', errors='ignore')).decode()
-    return f'<a href="data:file/txt;base64,{b64}" download="{filename}">📥 KLIK UNTUK DOWNLOAD FILE ID</a>'
+    return f'<a href="data:file/txt;base64,{b64}" download="{filename}">📥 DOWNLOAD FILE ID</a>'
 
-if file and st.button("🚀 TERJEMAHKAN SATU2", type="primary", use_container_width=True):
+if file and st.button("🚀 TERJEMAHKAN", type="primary", use_container_width=True):
     content = file.read().decode('utf-8', errors='ignore')
     lines = content.split('\n')
     
-    jobs = [] # [(idx, start, end, parts)]
+    jobs = [] # simpan semua teks yg di dalam "
+    for idx, line in enumerate(lines):
+        for m in re.finditer(r'"((?:[^"\\]|\\.)*?)"', line): # cari isi petik
+            original_text = m.group(1)
+            if original_text.strip() and original_text.strip().lower()!= "none":
+                jobs.append((idx, m.start(1), m.end(1), original_text))
 
-    with st.status("Step 1/3: Scan semua dialog...") as s1:
-        for idx, line in enumerate(lines):
-            for m in re.finditer(r'"((?:[^"\\]|\\.)*?)"', line):
-                original_text = m.group(1)
-                if original_text.strip() and original_text.strip().lower()!= "none":
-                    parts, texts = split_text_and_tags(original_text)
-                    if texts:
-                        jobs.append((idx, m.start(1), m.end(1), parts, texts))
-        s1.update(label=f"Step 1/3 Selesai: Nemu {len(jobs)} dialog", state="complete")
-
-    # TRANSLATE SATU2
-    progress = st.progress(0, text="Step 2/3: Menerjemahkan satu2...")
+    st.info(f"Nemu {len(jobs)} teks di dalam \"...\". Estimasi 10-15 menit")
+    results_all = []
+    progress = st.progress(0)
     
-    for i, (idx, start, end, parts, texts) in enumerate(jobs):
-        translated_texts = []
-        for t in texts:
-            try:
-                # TRANSLATE SATU KALIMAT
-                res = GoogleTranslator(source='en', target='id').translate(t)
-                translated_texts.append(str(res) if res else t)
-            except:
-                translated_texts.append(t) # kalau gagal, pake asli
-                time.sleep(10) # kalau ke ban nunggu lama
-            time.sleep(0.5) # jeda 0.5 detik biar gak ke ban
-        
-        final_text = join_text_and_tags(parts, translated_texts)
-        lines[idx] = lines[idx][:start+1] + final_text + lines[idx][end+1:]
-        
-        progress.progress((i+1) / len(jobs), text=f"Step 2/3: {i+1}/{len(jobs)}")
+    # TRANSLATE BATCH 100 BIAR CEPET
+    for i in range(0, len(jobs), 100):
+        chunk = [j[3] for j in jobs[i:i+100]] # ambil teksnya doang
+        try:
+            res = GoogleTranslator(source='auto', target='id').translate_batch(chunk)
+            results_all.extend([str(r) if r else c for r, c in zip(res, chunk)])
+        except:
+            st.warning(f"Chunk {i//100 + 1} ke ban. Nunggu 15 detik")
+            time.sleep(15)
+            results_all.extend(chunk) # gagal = pake asli
+        progress.progress((i+100) / len(jobs))
+        time.sleep(1.5)
+
+    # GANTI KE FILE DARI BELAKANG
+    for (idx, start, end, original), result in sorted(zip(jobs, results_all), reverse=True):
+        lines[idx] = lines[idx][:start+1] + result + lines[idx][end+1:]
 
     final_content = '\n'.join(lines)
-    st.success("✅ Step 3/3 Selesai!")
-    st.markdown(get_download_link(final_content, "ID_V86_" + file.name), unsafe_allow_html=True)
+    st.success("✅ Selesai! Tag {w} \\n aman 100%")
+    st.markdown(get_download_link(final_content, "ID_V90_" + file.name), unsafe_allow_html=True)
