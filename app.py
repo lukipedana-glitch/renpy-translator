@@ -1,66 +1,68 @@
 import streamlit as st
 import re
 import time
+import base64
 from deep_translator import GoogleTranslator
-from deep_translator.exceptions import NotValidPayload, TooManyRequests
 
-st.set_page_config(page_title="RenPy to ID V9.2", layout="wide")
-st.title("RenPy to ID V9.2 - TOMBOL DOWNLOAD PASTI ADA")
-st.caption("Cuma translate isi \"...\". Tag {w} \\n aman 100%")
+st.set_page_config(page_title="Universal to ID V7.6")
+st.title("Universal to ID Translator V7.6 - Fix Download")
 
 file = st.file_uploader("Upload file.rpy", type=["rpy"])
 
-if file and st.button("🚀 TERJEMAHKAN", type="primary", use_container_width=True):
+def protect(text):
+    tags = re.findall(r'\{[^}]*\}|\[[^\]]*\]|\\[nrt"\\]|\.\.|~|none', text, flags=re.IGNORECASE)
+    temp = text
+    for i,t in enumerate(tags):
+        temp = temp.replace(t, f'@@P{i}@@')
+    return temp, tags
+
+def unprotect(text, tags):
+    for i,t in enumerate(tags):
+        text = text.replace(f'@@P{i}@@', t)
+    return text
+
+def get_download_link(content, filename):
+    b64 = base64.b64encode(content.encode('utf-8')).decode()
+    return f'<a href="data:file/txt;base64,{b64}" download="{filename}">KLIK UNTUK DOWNLOAD FILE ID</a>'
+
+if file and st.button("TERJEMAHKAN KE INDONESIA", type="primary", use_container_width=True):
     content = file.read().decode('utf-8', errors='ignore')
     lines = content.split('\n')
+    batch = []
+    batch_index = []
 
-    jobs = []
-    for idx, line in enumerate(lines):
-        for m in re.finditer(r'"((?:[^"\\]|\\.)*?)"', line):
-            original_text = m.group(1)
-            if original_text.strip() and original_text.strip().lower()!= "none":
-                jobs.append((idx, m.start(1), m.end(1), original_text))
+    with st.status("Scan & Translate...") as s:
+        for idx, line in enumerate(lines):
+            m = re.match(r'^(\s*\w+\s*)"((?:[^"\\]|\\.)*)"(.*)$', line)
+            if m:
+                prefix, text, suffix = m.groups()
+                if text.strip() and text.strip().lower()!= "none":
+                    clean_text, tags = protect(text)
+                    if clean_text.strip():
+                        batch.append(clean_text)
+                        batch_index.append((idx, prefix, tags, suffix))
 
-    if not jobs:
-        st.warning("Gak nemu teks di dalam \"...\"")
-        st.stop()
+        # Translate per chunk 100
+        for i in range(0, len(batch), 100):
+            chunk = batch[i:i+100]
+            chunk_idx = batch_index[i:i+100]
+            try:
+                results = GoogleTranslator(source='auto', target='id').translate_batch(chunk)
+            except:
+                results = chunk
+                time.sleep(5)
 
-    st.info(f"Nemu {len(jobs)} teks. Mulai translate...")
-    results_all = []
-    log_area = st.empty()
-
-    # TRANSLATE BATCH 50
-    for i in range(0, len(jobs), 50):
-        chunk_jobs = jobs[i:i+50]
-        chunk_texts = [j[3] for j in chunk_jobs]
-
-        log_area.text(f"Translate {i+1} - {i+len(chunk_jobs)} / {len(jobs)}")
-
-        try:
-            res = GoogleTranslator(source='auto', target='id').translate_batch(chunk_texts)
-            results_all.extend([str(r) if r else c for r, c in zip(res, chunk_texts)])
-        except (NotValidPayload, TooManyRequests, Exception):
-            log_area.warning(f"Batch {i//50 + 1} error. Pake teks asli")
-            results_all.extend(chunk_texts)
-
-        time.sleep(2)
-
-    log_area.text("Selesai translate. Menulis ke file...")
-
-    # GANTI KE FILE DARI BELAKANG
-    for (idx, start, end, original), result in sorted(zip(jobs, results_all), reverse=True):
-        lines[idx] = lines[idx][:start+1] + result + lines[idx][end+1:]
+            for (idx, prefix, tags, suffix), result in zip(chunk_idx, results):
+                final_text = unprotect(result, tags)
+                lines[idx] = f'{prefix}"{final_text}"{suffix}'
+            time.sleep(1.5)
 
     final_content = '\n'.join(lines)
-    st.success("✅ Selesai Diterjemahkan!")
+    s.update(label="Selesai!", state="complete")
+    st.success("Selesai! Scroll ke bawah")
 
-    # TOMBOL DOWNLOAD BARU - INI YG PASTI MUNCUL
-    st.download_button(
-        label="📥 KLIK UNTUK DOWNLOAD FILE ID",
-        data=final_content.encode('utf-8'),
-        file_name="ID_V92_" + file.name,
-        mime="text/plain",
-        use_container_width=True
-    )
+    # TOMBOL DOWNLOAD BARU YANG GAK ILANG
+    st.markdown(get_download_link(final_content, "ID_V76_" + file.name), unsafe_allow_html=True)
+    st.info("Kalau link di atas gak bisa diklik, copy paste ke browser baru")
 
-    st.code(final_content[:500], language="text") # preview 500 karakter pertama
+st.caption("Tag { } \\n... none aman 100%")
